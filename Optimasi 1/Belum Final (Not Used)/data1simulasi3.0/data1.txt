@@ -1,0 +1,111 @@
+load_system("model1");
+set_param("model1","FastRestart","off");
+
+no_var = 30;
+
+lb_vmax = ones([1, no_var]) .* 23;
+lb_vmin = ones([1, no_var - 1]) .* 18;
+lb_glide = 22;
+
+ub_vmax = ones([1, no_var]) .* 28;
+ub_vmin = ones([1, no_var - 1]) .* 23;
+ub_glide = no_var;
+
+lb = [lb_vmax, lb_vmin, lb_glide];
+ub = [ub_vmax, ub_vmin, ub_glide];
+
+A1 = zeros([no_var-1,no_var*2]);
+for i = 1:no_var-1
+    A1(i,i) = -1;
+    A1(i,no_var+i) = 1;
+end
+   
+A2 = zeros([no_var - 1, no_var * 2]);
+for i = 1:no_var - 1
+    A2(i, i + 1) = -1;
+    A2(i, no_var + i) = 1;
+end
+
+A = [A1; A2];
+b = ones([(no_var - 1) * 2, 1]) .* -5;
+
+
+ga_opt = optimoptions('ga', ...
+    'Display','off', ...
+    'Generations', 200, ...           % Jumlah Generasi Maksimum: 500
+    'PopulationSize', 100, ...           % Jumlah Populasi: 
+    'PlotFcns',{@gaplotbestf,@gaplotscores,@gaplotbestindiv}, ...
+    'CreationFcn', @gacreationuniform, ... % Algoritma Creation: Uniform
+    'FitnessScalingFcn', @fitscalingrank, ... % Algoritma Scaling: Rank
+    'SelectionFcn', {@selectiontournament,4}, ... % Algoritma Seleksi: Tournament
+    'MutationFcn', @mutationadaptfeasible, ... % Algoritma Mutasi: Adaptive Feasible
+    'CrossoverFcn', @crossoverarithmetic, ... % Algoritma Crossover: Arithmetic
+    'CrossoverFraction', 0.8, ...        % Fraksi Crossover: 0.5
+    'EliteCount',5, ...   % Fraksi Elite: sebelumnya 5
+    'UseParallel', true);                % UseParallel: True
+
+% 8. DEFINE OBJECTIVE FUNCTION
+obj_fn = @(control_array) tunning2(control_array);
+IntCon = 1:(no_var * 2);
+
+% 9. RUN GA WITH TIMING
+fprintf('\n=== Starting Parallel GA Optimization ===\n');
+
+[control_array, best] = ga(obj_fn, no_var * 2, A, b, [], [], lb, ub, [], IntCon, ga_opt);
+
+
+
+
+
+% ==================== FUNGSI FITNESS UNTUK PARALLEL ====================
+function cost = tunning2(control_array)
+    % Fungsi ini HARUS ADA di file terpisah bernama tunning2_parallel.m
+    % atau didefinisikan di bawah kode utama
+    % 
+    % % Load variables from .mat file
+    loaded_vars = load('model_variables.mat');
+    % 
+    % % Assign variables to base workspace
+    names = fieldnames(loaded_vars);
+    for i = 1:length(names)
+         assignin('base', names{i}, loaded_vars.(names{i}));
+    end
+    % 
+    % Load model (setiap worker perlu load sendiri)
+    model_name = "model1";
+    
+    % Cek jika model sudah loaded
+    load_system(model_name);
+    
+    
+    set_param(model_name, "FastRestart", "on");
+    
+    no_var = 30;
+    
+    set_param(model_name + "/DriverModel/Constant", "Value", mat2str(control_array));
+    set_param(model_name + "/DriverModel/Constant1", "Value", num2str(no_var));
+    
+    % Run simulation
+    out = sim(model_name);
+    
+    set_param(model_name, "FastRestart", "off");
+    
+    % Calculate cost
+    x = 20;
+    
+    s_min = 9100;
+    s_sim = out.distance(length(out.distance));
+    
+    t_max = 1490;
+    t_sim = out.time(length(out.time));
+    
+    Wh = out.Wh(length(out.Wh));
+    
+    f1 = Wh;
+    f2 = x*activation(s_min - s_sim); % activation function
+    f3 = cos(abs(s_min - s_sim) / s_min);
+    f4 = cos(abs(t_max - t_sim) / t_max);
+    
+    cost = (f1 + f2) / (f3 * f4)
+
+end
